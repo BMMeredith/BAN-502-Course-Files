@@ -1,0 +1,253 @@
+---
+output:
+  word_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+### BAN 502 - Mod 4, Assignment 2
+### Meredith, Breandan
+
+```{r Libraries,include=FALSE}
+#install.packages("caret")
+#install.packages("rpart")
+#install.packages("rpart.plot")
+#install.packages("rattle")
+#install.packages("RColorBrewer")
+
+library(tidyverse)
+library(tidymodels)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(RColorBrewer)
+```
+
+```{r Data_Import}
+parole = read_csv("C:/Users/icema/Desktop/UNCW/BAN 502 (Predictive Analytics)/Module 4 (Other Classification Methods)/Assignment 2/parole.csv")
+
+parole = parole %>% 
+  mutate(male=as_factor(male)) %>%
+  mutate(male=fct_recode(male,"female"="0", "male"="1")) %>%
+  mutate(race=as_factor(race)) %>%
+  mutate(race = fct_recode(race,"white"="1")) %>%
+  mutate(state=as_factor(state)) %>%
+  mutate(state = fct_recode(state, "Kentucky" = "2", "Louisiana" = "3", "Virginia" = "4")) %>%
+  mutate(crime=as_factor(crime)) %>% 
+  mutate(crime = fct_recode(crime,"other" = "1", "larceny" = "2", "drug-related" = "3", "driving-related" = "4")) %>%
+  mutate(multiple.offenses=as_factor(multiple.offenses)) %>% 
+  mutate(multiple.offenses = fct_recode(multiple.offenses, "No" = "0", "Yes" = "1")) %>%
+  mutate(violator=as_factor(violator)) %>%
+  mutate(violator = fct_recode(violator, "No" = "0", "Yes" = "1"))
+```
+
+```{r Task_1}
+set.seed(12345)
+parole_split = initial_split(parole,prop=0.70,strata=violator)
+train = training(parole_split)
+test = testing(parole_split)
+```
+
+```{r Task_2}
+parole_recipe = recipe(violator ~., train)
+
+tree_model = decision_tree() %>%
+  set_engine("rpart", model = TRUE) %>%
+  set_mode("classification")
+
+parole_wflow =
+  workflow() %>%
+  add_model(tree_model) %>%
+  add_recipe(parole_recipe)
+
+train_fit = fit(parole_wflow, train)
+
+# train_fit %>%
+#   pull_workflow_fit() %>%
+#   pluck("fit")
+#commented out for conciseness when knitting Word doc
+
+tree = train_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit")
+
+fancyRpartPlot(tree, tweak = 1.2)
+```
+
+*Task 3:* We would classify the parolee as "No." The parolee was from Louisiana, not from the other states, so we go to the right (or "no") at the first node. The second node we arrive at is "multiple offenses = No" - as the parolee did commit multiple offenses, we go left to "No". Third node we encounter asks if the parolee's time served is less than 4.8 years. As the parolee has served 5 years, we go left again, and the parolee would be classified as "No," with a 88% accuracy. 
+
+```{r Task_4}
+train_fit$fit$fit$fit$cptable
+```
+
+*Task 4:* The optimal cp value is 0.01, as the maximum xerror is 1.128. No, the tree from task 2 is not associated with this optimal cp value. 
+
+```{r Task_5}
+set.seed(123)
+folds = vfold_cv(train, v = 5)
+```
+
+```{r Task_5_cont}
+parole_recipe = recipe(violator ~., train) %>%
+  step_dummy(all_nominal(),-all_outcomes())
+
+tree_model = decision_tree(cost_complexity = tune()) %>%
+  set_engine("rpart", model = TRUE) %>%
+  set_mode("classification")
+
+tree_grid = grid_regular(cost_complexity(), levels = 25)
+
+parole_wflow =
+  workflow() %>%
+  add_model(tree_model) %>%
+  add_recipe(parole_recipe)
+
+tree_res = 
+  parole_wflow %>%
+  tune_grid(
+    resamples = folds,
+    grid = tree_grid)
+
+tree_res
+
+tree_res %>%
+  collect_metrics() %>%
+  ggplot(aes(cost_complexity, mean)) +
+  geom_line(size = 1.5, alpha = 0.6) +
+  geom_point(size = 2) +
+  facet_wrap(~ .metric, scales = "free", nrow = 2)
+```
+
+```{r Task_6}
+best_tree = tree_res %>%
+  select_best("accuracy")
+
+best_tree
+```
+
+*Task 6:* The cp value of 0.1 yields the "optimal" accuracy value. 
+
+```{r Task_7}
+final_wflow = parole_wflow %>%
+  finalize_workflow(best_tree)
+
+final_fit = fit(final_wflow, train)
+
+tree = final_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit")
+
+#fancyRpartPlot(tree, tweak = 1.2)
+```
+
+```{r Task_8}
+treepred = predict(final_fit, train, type = "class")
+#head(treepred)
+
+confusionMatrix(treepred$.pred_class, train$violator, positive = "Yes")
+```
+
+```{r Task_8_cont}
+treepred_test = predict(final_fit, test, type = "class")
+#head(treepred_test)
+
+confusionMatrix(treepred_test$.pred_class, test$violator, positive = "Yes")
+```
+
+
+*Task 8:* So I decided to use the caret confusionMatrix to test the accuracy of the "root" found in Task 7. The confusionMatrix accuracy of the training set resulted in an accuracy of 88.37%, and the accuracy of the model on the test set is 88.61%
+
+
+```{r Task_9}
+blood = read_csv("C:/Users/icema/Desktop/UNCW/BAN 502 (Predictive Analytics)/Module 4 (Other Classification Methods)/Assignment 2/Blood.csv")
+
+blood = blood %>%
+  mutate(DonatedMarch = as_factor(DonatedMarch)) %>%
+  mutate(DonatedMarch = fct_recode(DonatedMarch, "No" = "0", "Yes" = "1")) %>%
+  mutate(DonatedMarch = fct_relevel(DonatedMarch, "No"))
+```
+
+```{r Task_9_cont1}
+set.seed(1234)
+blood_split = initial_split(blood, prop = 0.70, strata = DonatedMarch)
+train2 = training(blood_split)
+test2 = testing(blood_split)
+```
+
+```{r Task_9_cont2}
+set.seed(1234)
+folds2 = vfold_cv(train2, v = 5)
+```
+
+```{r Task_9_cont3}
+blood_recipe = recipe(DonatedMarch ~., train2) %>%
+  step_dummy(all_nominal(),-all_outcomes())
+
+tree_model2 = decision_tree(cost_complexity = tune()) %>%
+  set_engine("rpart", model = TRUE) %>%
+  set_mode("classification")
+
+tree_grid2 = grid_regular(cost_complexity(), levels = 25)
+
+blood_wflow2 = 
+  workflow() %>%
+  add_model(tree_model2) %>%
+  add_recipe(blood_recipe)
+
+tree_res2 = 
+  blood_wflow2 %>%
+  tune_grid(
+    resamples = folds2,
+    grid = tree_grid2
+  )
+
+tree_res2
+
+tree_res2 %>%
+  collect_metrics() %>%
+  ggplot(aes(cost_complexity, mean)) +
+  geom_line(size = 1.5, alpha = 0.6) + 
+  geom_point(size = 2) +
+  facet_wrap(~ .metric, scales = "free", nrow = 2)
+
+best_tree2 = tree_res2 %>%
+  select_best("accuracy")
+
+best_tree2
+
+final_wf2 = 
+  blood_wflow2 %>%
+  finalize_workflow(best_tree2)
+
+final_fit2 = fit(final_wf2, train2)
+
+tree2 = final_fit2 %>%
+  pull_workflow_fit() %>%
+  pluck("fit")
+```
+
+*Task 9:* After tuning, it appears that the optimal cp value for accuracy is 0.1. however, when we look at the cptable from the model before tuning, we can see that the cp value is 0.01. 
+
+```{r Task_10}
+fancyRpartPlot(tree2, tweak = 1.5)
+```
+
+```{r Task_11}
+treepred2 = predict(final_fit2, train2, type = "class")
+head(treepred2)
+
+confusionMatrix(treepred2$.pred_class, train2$DonatedMarch, positive = "Yes")
+```
+
+```{r Task_11_cont}
+treepred2_test = predict(final_fit2, test2, type = "class")
+head(treepred2_test)
+
+confusionMatrix(treepred2_test$.pred_class, test2$DonatedMarch, positive = "Yes")
+```
+
+*Task 11:* The prediction on the training set result in 80.53% accuracy. Predicting the test set resulted in a 78.12% accuracy. Based on how close these accuracy results are, I would say that the model is not overfit to the data and I would use it in the real world if necessary. 
+ 
+
+

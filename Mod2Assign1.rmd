@@ -1,0 +1,96 @@
+---
+output:
+  word_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+#BAN 502 - Module 2 Assignment 1
+
+```{r Libraries}
+library(tidyverse)
+library(tidymodels)
+library(GGally)
+library(lmtest)
+```
+
+```{r Task 1}
+air = airquality
+```
+
+*Task 1:* There are 153 observations of 6 variables within this dataset. Unfortunately, there is also missing data within this dataset. Based on quick observation, it seems likely that the response variable would be temperature (Temp). 
+
+```{r Task 2}
+air2 = drop_na(air)
+```
+
+*Task 2:* After removing the rows with missing data and creating the new dataframe named "air2" we now have 111 observations with 6 variables. 
+
+```{r Task 3}
+ggpairs(air2)
+ggcorr(air2, label=TRUE)
+```
+
+*Task 3:* Based on the correlation matrix, it appears that the temperature (Temp) variable is most strongly correlated with the Ozone variable. Using this same matrix we can see that the Day variable is the least strongly correlated variable with the Ozone variable.
+
+```{r Task 4}
+ggplot(air2,aes(Temp,Ozone)) +
+  geom_point()
+```
+
+*Task 4:* Looking at the scatter plot, we can see that as the temperatures rise, the Ozone level increases. 
+
+```{r Task 5}
+air2_recipe = recipe(Ozone ~ Temp, air2)
+
+lm_model = 
+  linear_reg() %>%
+  set_engine("lm")
+
+lm_wflow = 
+  workflow() %>%
+  add_model(lm_model) %>%
+  add_recipe(air2_recipe)
+
+lm_fit = fit(lm_wflow, air2)
+
+summary(lm_fit$fit$fit$fit)
+
+confint(lm_fit$fit$fit$fit)
+
+```
+
+*Task 5 (a):* This model seems to be a fairly decent quality model. Looking at the summary of the model, the p value of the model is extremely low, indicating that Temp is significant in this model. With the R-squared value at 0.488, this indicates that the model does an okay job of fitting the data, but some adjustments could probably be made to make the model a better fit for the data.
+*Task 5 (b):* Based on 95% confidence intervals, the slope coefficient likely falls between -184.82 and -110.47.
+
+```{r Task 6}
+ggplot(air2,aes(Temp,Ozone)) +
+  geom_point() +
+  geom_smooth(method="lm",se=FALSE)
+```
+
+``` {r Task 7}
+testdata = data.frame(Temp=80)
+predict(lm_fit, new_data=testdata)
+```
+
+*Task 7:* Using the predict() function with a set Temp of 80 results in an Ozone prediction of 47.5.  
+
+``` {r Task 8}
+dwtest(lm_fit$fit$fit$fit)
+
+air2 = air2 %>% mutate(resid1=lm_fit$fit$fit$fit$residuals)
+ggplot(air2, aes(Temp,resid1)) +
+  geom_point()
+
+ggplot(air2,aes(resid1)) +
+  geom_histogram()
+```
+
+*Assumption 1 (The predictor and response variables have a linear relationship):* Based on the scatter plots above, it is reasonable to sat the there is a linear relationship between the predictor and response variables. There may be a slight nonlinear relationship between the variables, ans at both tails, most of the points are above the regression line, and in the middle most of the points are below the regression line. 
+
+*Assumption 2 (Model errors (residuals) are independent):* Based on the results of the Durbin-Watson test, the data provides a p-value that is greater than 0.05, indicating that the residuals are likely independent. 
+
+*Assumption 3 (Model residuals exhibit constant variance):* Upon graphing the residuals, we can see that there is a non-linear effect present. It is possible that this assumption is violated, as the spread does seem to expand.
+
+*Assumption 4 (Model residuals are normally distributed):* The histogram of the residuals appears to have two peaks and therefore does not appear to be normally distributed. 

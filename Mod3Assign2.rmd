@@ -1,0 +1,199 @@
+---
+output:
+  word_document: default
+  html_document: default
+editor_options: 
+  chunk_output_type: console
+---
+## BAN 502, Module 3 - Assignment 2
+
+```{r Libraries, include=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(e1071)
+library(ROCR)
+```
+
+```{r Read-In}
+parole = read_csv("C:/Users/icema/Desktop/UNCW/BAN 502 (Predictive Analytics)/Module 3/Mod2Assign2/parole.csv")
+
+parole = parole %>% 
+  mutate(male=as_factor(male)) %>%
+  mutate(male=fct_recode(male,"female"="0", "male"="1")) %>%
+  mutate(race=as_factor(race)) %>%
+  mutate(race = fct_recode(race,"white"="1")) %>%
+  mutate(state=as_factor(state)) %>%
+  mutate(state = fct_recode(state, "Kentucky" = "2", "Louisiana" = "3", "Virginia" = "4")) %>%
+  mutate(crime=as_factor(crime)) %>% 
+  mutate(crime = fct_recode(crime,"other" = "1", "larceny" = "2", "drug-related" = "3", "driving-related" = "4")) %>%
+  mutate(multiple.offenses=as_factor(multiple.offenses)) %>% 
+  mutate(multiple.offenses = fct_recode(multiple.offenses, "No" = "0", "Yes" = "1")) %>%
+  mutate(violator=as_factor(violator)) %>%
+  mutate(violator = fct_recode(violator, "No" = "0", "Yes" = "1"))
+```
+
+```{r Task 1}
+set.seed(12345)
+parole_split = initial_split(parole,prob=0.70,strata=violator)
+train = training(parole_split)
+test = testing(parole_split)
+```
+
+```{r Task 2}
+ggplot(train, aes(x = male, fill = violator)) + geom_bar() 
+ggplot(train, aes(x = race, fill = violator)) + geom_bar()
+ggplot(train, aes(x = state, fill = violator)) + geom_bar() 
+ggplot(train, aes(x = crime, fill = violator)) + geom_bar() 
+ggplot(train, aes(x = multiple.offenses, fill = violator)) + geom_bar()
+ggplot(train, aes(x = time.served, fill = violator)) + geom_bar()
+ggplot(train, aes(x = max.sentence, fill = violator)) + geom_bar()
+ggplot(train, aes(x = age, fill = violator)) + geom_histogram()
+
+t1 = table(train$violator, train$time.served)
+prop.table(t1, margin = 2)
+```
+
+*Task 2:* Based on the variables we have available, I think that gender, state, whether or not the offender has multiple offenses, the age of the offender, and the initial crime may all be predictors of whether or not the offender violates their parole. It seems likely that younger males who were convicted of multiple offenses may be likely to violate their parole, as they may be more likely to assume they will not get caught breaking the law again. Setting up a table to determine the likelihood of using time served as a predictor gave results that indicated it may not be a good predictor - this could change if it included offenders that served longer sentences. For the next task I will be using the age variable to in the logistic regression.
+
+```{r Task 3}
+parole_model = 
+  logistic_reg() %>%
+  set_engine("glm")
+
+parole_recipe = recipe(violator ~ age, train) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+logreg_wf = workflow() %>%
+  add_recipe(parole_recipe) %>%
+  add_model(parole_model)
+
+train_fit = fit(logreg_wf, train)
+
+summary(train_fit$fit$fit$fit)
+```
+
+*Task 3:* The AIC given by the logistic regression model is 368.28. This seems like a low number, however we have nothing to compare it to to determine if its the lowest AIC we can get (and - by extension - the best model). I'm inclined to believe that we can get a better model using multiple predictors. 
+
+```{r Task 4}
+parole_model = 
+  logistic_reg() %>%
+  set_engine("glm")
+
+parole_recipe = recipe(violator ~ age + crime + max.sentence + multiple.offenses + state, train) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+logreg_wf = workflow() %>%
+  add_recipe(parole_recipe) %>%
+  add_model(parole_model)
+
+train_fit2 = fit(logreg_wf, train)
+
+summary(train_fit2$fit$fit$fit)
+```
+
+*Task 4:* The next step I tried was to use age, male, and multiple offenses. It resulted in an AIC of 366.73. Slightly better, but not significantly better. Using age, male, and crime resulted in a higher AIC of 373.51, so not a better model. An AIC of 359.69 was provided when using age, crime, max sentence and multiple offenses. After trying a few more combinations, the best model I could come up with was one that included the age of the offender, the crime committed, the max sentence of the crime, whether there were multiple offenses, and the state in which the crime was committed. This model resulted in an AIC of 298.02, and based on the variables included, could be fairly intuitive - all of the factors logically make sense as potential predictors of whether a parolee will violate their parole. 
+
+```{r Task 5}
+parole_model2 = 
+  logistic_reg() %>%
+  set_engine("glm")
+
+parole_recipe = recipe(violator ~ state + multiple.offenses + race, train) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+logreg_wf = workflow() %>%
+  add_recipe(parole_recipe) %>%
+  add_model(parole_model2)
+
+train_fit3 = fit(logreg_wf, train)
+
+summary(train_fit3$fit$fit$fit)
+```
+
+*Task 5:* The model that includes state, multiple offenses, and race as predictor variables seems to be a good model, when the AIC of 289.99 is compared to the AIC values of my attempts above. However, it seems that of the three variables included in this model, state and whether or not the parolee was convicted of multiple offenses are the significant variables. Race does not seem to be significant here, as the p-value is above 0.05.
+
+```{r Task 6}
+newdata = data.frame(state = "Louisiana", race = "white", multiple.offenses = "Yes")
+predict(train_fit3, newdata, type="prob")
+
+newdata = data.frame(state = "Kentucky", race = "2", multiple.offenses = "No")
+predict(train_fit3, newdata, type="prob")
+```
+
+*Task 6:* With parolee 1, the predicted probability of parole violation is 0.443, or 44.3% likely to violate parole. Parolee 2, however, has a 0.152 or 15.2% likelihood of of violating parole. 
+
+```{r Task 7}
+parole_model3 = 
+  logistic_reg(mode = "classification") %>%
+  set_engine("glm")
+
+parole_recipe = recipe(violator ~., train) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+logreg_wf = workflow() %>%
+  add_recipe(parole_recipe) %>%
+  add_model(parole_model3)
+
+train_fit4 = fit(logreg_wf, train)
+
+summary(train_fit4$fit$fit$fit)
+
+predictions = predict(train_fit4, train, type="prob")[2]
+head(predictions)
+```
+
+```{r Task 7, cont.}
+ROCRpred = prediction(predictions, train$violator)
+
+ROCRperf = performance(ROCRpred, "tpr", "fpr")
+plot(ROCRperf, colorize=TRUE, print.cutoffs.at=seq(0,1,by=0.1),text.adj=c(-0.2,1.7))
+
+opt.cut = function(perf, pred){
+  cut.ind = mapply(FUN=function(x, y, p){
+    d = (x - 0)^2 + (y-1)^2
+    ind = which(d == min(d))
+    c(sensitivity = y[[ind]], specificity = 1-x[[ind]],
+      cutoff = p[[ind]])
+  }, perf@x.values, perf@y.values, pred@cutoffs)
+}
+print(opt.cut(ROCRperf, ROCRpred))
+```
+
+
+```{r Task 8}
+t2 = table(train$violator,predictions > 0.1258245)
+t2
+
+(t2[1,1]+t2[2,2])/nrow(train)
+```
+
+```{r Task 8, cont.}
+#sensitivity
+44/(44+84)
+
+#specificity
+364/(364+15)
+```
+
+*Task 8:* At the threshold, the accuracy is 0.8047, or 80.47% accuracy. The sensitivity is 0.34375, and the specificity is 0.9604222. These values indicate that 34.38% of positives are correctly identified, and that 96% of negatives are correctly identified. Incorrectly classifying a parolee could lead to the possibility of the parolee being denied parole if we predict that it is likely the parolee would violate their parole.  
+
+```{r Task 9}
+t3 = table(train$violator,predictions > 0.6)
+t3
+
+(t3[1,1]+t3[2,2])/nrow(train)
+```
+
+*Task 9:* Through trial and error, I found that a probability threshold of 0.60 provides the highest accuracy at 0.88955 or approximately 88.96% accuracy. 
+
+```{r Task 10}
+predictions2 = predict(train_fit4, test, type="prob")[2]
+
+t3 = table(test$violator, predictions2 > 0.6)
+t3 
+
+(t3[1,1]+t3[2,2])/nrow(test)
+```
+
+*Task 10:* Using the threshold from Task 9 on the testing set, the accuracy of the model is 0.8988, or 89.88%.
+

@@ -1,0 +1,152 @@
+---
+output:
+  word_document: default
+  html_document: default
+editor_options: 
+  chunk_output_type: console
+---
+# BAN 502 - Module 2, Assignment 2
+
+```{r Libraries and Packages}
+library(tidyverse)
+library(tidymodels)
+library(lubridate)
+library(lmtest)
+library(GGally)
+library(glmnet)
+library(MASS)
+library(ggcorrplot)
+library(car)
+```
+
+```{r Task 1}
+bike = read_csv("C:/Users/icema/Desktop/UNCW/BAN 502 (Predictive Analytics)/Module 2/Mod2Asst2/bike_cleaned.csv")
+
+bike = bike %>% 
+  mutate(dteday = mdy(dteday)) %>%
+  mutate(hr = as.factor(hr))
+
+bike = bike %>% mutate_if(is.character,as.factor)
+
+```
+
+*Task 1:* We convert the "hr" variable into a factor so we have the option to use it as a categorical variable in this scenario. 
+
+```{r Task 2}
+ggpairs(bike,columns=c("temp","atemp","hum","windspeed","count","instant")) +
+  theme(axis.text.x = element_text(angle = 90))
+
+ggcorr(bike,label=TRUE,label_round=3)
+```
+
+*Task 2:* When looking at either of the plots above, we can see that - of the available quantitative variables (while ignoring the "casual" and "registered" values) - the one that seems to be best correlated with "count" is "temp."
+
+```{r Task 3}
+ggplot(bike,aes(x=hr,y=count)) + geom_boxplot() + theme_bw()
+
+ggplot(bike,aes(x=season,y=count)) + geom_boxplot() + theme_bw()
+
+ggplot(bike,aes(x=mnth,y=count)) + geom_boxplot() + theme_bw() + scale_x_discrete(limits = month.abb)
+
+ggplot(bike,aes(x=holiday,y=count)) + geom_boxplot() + theme_bw()
+
+ggplot(bike,aes(x=weekday,y=count)) + geom_boxplot() + theme_bw()
+
+ggplot(bike,aes(x=workingday,y=count)) + geom_boxplot() + theme_bw()
+
+ggplot(bike,aes(x=weathersit,y=count)) + geom_boxplot() + theme_bw()
+```
+
+*Task 3:* Analyzing the boxplots, we can see that there are some categorical variables that affect the count of bikes shared through the bikeshare service. The month is a variable in which we can see a definite difference in the number of bikes shared (for this boxplot we organized the data in a chronological order, from January to December). This variance can more than likely be attributed to the average temperatures and types of precipitation present in Washington, D.C. area during specific months of the year. Logically, we would expect to see that the season affects the count of bikes shared for the same reasons, and we see this as well - most notably with a slight increase in the number of bikes shared in the summer and a large decrease in the number of bikes shared in the winter. The variable of "holiday" affects the count slightly, although not as much as you would expect (I expected the count to be lower on the holidays due to people not needing to use bikesharing for their commute). The lack of significant variance here indicates that a majority of people that use bike sharing programs may not rely on them as a main commuting method. Much like the "holiday" results, the count of bikes shared does not fluctuate much by the day of the week, also likely due to the same commuting assumption made by the analyst. The variable "workingday" produced similar results as well, which follows logically from the lack of significant variance in the "weekday" variable. As we can see from the last boxplot, the categorical variable "weathersit" had quite an impact on the count of bikes shared, in my opinion this is due to the fact that people would be much less willing to ride a bike in situations in which there is precipitation.
+
+```{r Task 4}
+bike_recipe = recipe(count ~ mnth, bike)
+
+lm_model = 
+  linear_reg() %>%
+  set_engine("lm")
+
+lm_wflow = 
+  workflow() %>%
+  add_model(lm_model) %>%
+  add_recipe(bike_recipe)
+
+lm_fit = fit(lm_wflow, bike)
+```
+
+``` {r Task 4, cont.}
+summary (lm_fit$fit$fit$fit)
+```
+
+*Task 4:* Here we are attempting to use mnth (or month) as a single predictor of count. This model resulted in p-values for each month (except November) that  were significantly less than 0.05, indicating that mnth may be a significant variable in predicting the count of bikes shared through the program. However, a low multiple r-squared value of 0.07505 indicates that, though mnth may be significant, a single-predictor model (even using a seemingly-logical one like month) is not a good model for predicting the count of bikes shared. 
+
+``` {r Task 5, ridge}
+bike_recipe2 = recipe(count ~., bike) %>%
+  step_rm(instant,dteday,registered,casual) %>%
+  step_dummy(all_nominal()) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors())
+
+ridge_model = 
+  linear_reg(mixture=0) %>%
+  set_engine("glmnet")
+
+ridge_wflow =
+  workflow() %>%
+  add_model(ridge_model) %>%
+  add_recipe(bike_recipe2)
+
+ridge_fit = fit(ridge_wflow, bike)
+```
+
+```{r Task 5 - ridge, cont.}
+ridge_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit") 
+
+ridge_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit") %>%
+  coef(s=15)
+```
+
+*Task 5: * After selecting a lambda value of 15 (with an adjusted r-squared value of 0.6205), we can take a look at the coefficients for the variables that correspond to a lambda value of 15. Based on the coefficients for the seasons, we may be seeing a hint of multicollinearity, as it doesn't make much sense for the coefficient for Summer to be negative, although it's possible if it's a hot summer. The coefficients for all other variables don't seem to be throwing up any red flags, as far as I can tell, although with the low numbers of the coefficients for the days of the week, these numbers may support the idea that the day of the week is not a good predictor of the number of bikes that would be shared. Looking at this, we may want to think about taking a closer look at the month parameter, due to the positive coefficient for December and the negative coefficients for June and July.
+
+``` {r Task 6 - lasso} 
+bike_recipe3 = recipe(count ~., bike) %>%
+  step_rm(instant,dteday,registered,casual) %>%
+  step_dummy(all_nominal()) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors())
+
+lasso_model = 
+  linear_reg(mixture=1) %>%
+  set_engine("glmnet")
+
+lasso_wflow =
+  workflow() %>%
+  add_model(lasso_model) %>%
+  add_recipe(bike_recipe3)
+
+lasso_fit = fit(lasso_wflow, bike)
+```
+
+```{r Task 6 - lasso, cont.}
+lasso_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit")
+
+lasso_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit") %>%
+  coef(s=0.099)
+```
+
+*Task 6:* Using the lasso method, we ended up selecting the lambda value of 0.099 (with an adjusted r-squared value of 0.6321). From the results of this selection, we can see that most of the included variables had some effect on the prediction, with other variables (such as the month of December, whether or not it's a working day, or if it's a saturday) being dropped from the model entirely. Based on the adjusted r-squared value, we can say that the model does a decent job of predicting the cound of bikes shared.  
+
+
+*Overall:* Based on the adjusted r-squared of both models, we can say that the models would be okay (but not stellar) at predicting the number of bikes shared within the Washington, D.C. area. If a more accurate prediction would be desired, there may need to be more data gathered - data that is relevant to predictable variables. It can be noted that all models have proven that predictions based on a combination of variables in the dataset (such as temperature, humidity, time of the year (month and season) are likely to follow logic and be vaguely accurate.  
+
+
+Side note: I ran stepwise modifications below (then deleted them - they created a lot of pages on the Word document), just to see what would happen. It turns out, regardless of direction, most variables were significant (supporting what we gathered from the lasso and ridge methods). I may have encountered my new favorite phrase in one of the warning messages from 'r' though: 'attempting model selection on an essentially perfect fit is nonsense.'
+
